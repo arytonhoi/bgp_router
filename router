@@ -52,6 +52,11 @@ class Router:
       self.relations[network] = relation
     print("Finished constructor")
 
+  def dict_to_binary(self, the_dict):
+    str = json.dumps(the_dict)
+    binary = ' '.join(format(ord(letter), 'b') for letter in str)
+    return binary
+
   def lookup_routes(self, daddr):
     """ Lookup all valid routes for an address """
     # TODO
@@ -110,7 +115,9 @@ class Router:
 
   def forward(self, srcif, packet):
     """ Forward a data packet """
-    srcif.sendall(packet)
+    print("Attempting to forward {}".format(packet))
+    binary = self.dict_to_binary(packet)
+    self.sockets[srcif].sendall(binary.encode('ascii'))
     return False
 
   def coalesce(self):
@@ -125,7 +132,7 @@ class Router:
     # saving copy
     if srcif not in self.updates:
       self.updates[srcif] = []
-    self.update[srcif].append(packet)
+    self.updates[srcif].append(packet)
 
     # saving to forwarding table
     src_ip = packet['src']
@@ -144,7 +151,7 @@ class Router:
     print("Added {} to {} forwarding table".format(route_entry, network))
 
     # sending copy to neighbors
-    if self.relations['srcif'] == 'cust':
+    if self.relations[srcif] == 'cust':
       # send to all other neighbors
       for neighbor in self.relations:
         if not self.relations[neighbor] == srcif:
@@ -173,19 +180,20 @@ class Router:
     msg = {}
     msg['src'] = packet['dst']
     msg['dst'] = packet['src']
-    msg['type'] = packet['table']
+    msg['type'] = 'table'
     msg['msg'] = dump
 
     print('Dumping: {}'.format(msg))
-    return dump
+    return msg
 
   def handle_packet(self, srcif, packet):
     """ dispatches a packet """
+    print("======================")
     print("Handle packet: srcif {} packet {}".format(srcif, packet))
     if packet['type'] == 'update':
       self.update(srcif, packet)  
-    else if packet['type'] == 'dump':
-      self.forward(srcif, self.dump(srcif, packet))
+    elif packet['type'] == 'dump':
+      self.forward(srcif, self.dump(packet))
 
     return False
 
