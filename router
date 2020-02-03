@@ -110,7 +110,7 @@ class Router:
 
   def forward(self, srcif, packet):
     """ Forward a data packet """
-    # TODO
+    srcif.sendall(packet)
     return False
 
   def coalesce(self):
@@ -144,7 +144,16 @@ class Router:
     print("Added {} to {} forwarding table".format(route_entry, network))
 
     # sending copy to neighbors
-
+    if self.relations['srcif'] == 'cust':
+      # send to all other neighbors
+      for neighbor in self.relations:
+        if not self.relations[neighbor] == srcif:
+          self.forward(neighbor, packet)
+    else:
+      # send to customers
+      for neighbor in self.relations:
+        if self.relations[neighbor] == 'cust':
+          self.forward(neighbor, packet)
 
     return False
 
@@ -176,7 +185,7 @@ class Router:
     if packet['type'] == 'update':
       self.update(srcif, packet)  
     else if packet['type'] == 'dump':
-      srcif.sendall(self.dump(srcif, packet))
+      self.forward(srcif, self.dump(srcif, packet))
 
     return False
 
