@@ -38,8 +38,9 @@ PROV = "prov"
 
 class Router:
   """ Your Router """
-  def __init__(self, networks):
+  def __init__(self, asn, networks):
     print("Started constructor")
+    self.asn = asn
     self.routes = {}
     self.updates = {}
     self.relations = {}
@@ -51,11 +52,6 @@ class Router:
       self.sockets[network].connect(network)
       self.relations[network] = relation
     print("Finished constructor")
-
-  def dict_to_binary(self, the_dict):
-    str = json.dumps(the_dict)
-    binary = ' '.join(format(ord(letter), 'b') for letter in str)
-    return binary
 
   def lookup_routes(self, daddr):
     """ Lookup all valid routes for an address """
@@ -112,12 +108,15 @@ class Router:
       # Final check: enforce peering relationships
       routes = self.filter_relationships(srcif, routes)
     return self.sockets[peer] if peer else None
+    
 
   def forward(self, srcif, packet):
     """ Forward a data packet """
-    print("Attempting to forward {}".format(packet))
-    binary = self.dict_to_binary(packet)
-    self.sockets[srcif].sendall(binary.encode('ascii'))
+    # dst = srcif[:-1] + '1'
+    print("Attempting to forward {} to {}".format(packet, srcif))
+    # binary = self.dict_to_binary(packet)
+    self.sockets[srcif].sendall(json.dumps(packet).encode('ascii'))
+    print("Forwarded!")
     return False
 
   def coalesce(self):
@@ -151,15 +150,24 @@ class Router:
     print("Added {} to {} forwarding table".format(route_entry, network))
 
     # sending copy to neighbors
+    # updating AS path
+    packet['msg']['ASPath'].append(self.asn)
+    dst =  packet['dst']
+
     if self.relations[srcif] == 'cust':
-      # send to all other neighbors
-      for neighbor in self.relations:
-        if not self.relations[neighbor] == srcif:
+      print("Fowarding update to all neighbors")
+      # send to all other neighbors not in same network
+      for neighbor in self.relations:        
+        if neighbor.split('.')[0] != network.split('.')[0]:
+          packet['dst'] = neighbor
+          packet['src'] = neighbor[:-1] + '1'
           self.forward(neighbor, packet)
     else:
       # send to customers
+      print("Fowarding update to all customers")
       for neighbor in self.relations:
         if self.relations[neighbor] == 'cust':
+          packet['dst'] = neighbor
           self.forward(neighbor, packet)
 
     return False
@@ -171,29 +179,49 @@ class Router:
 
   def dump(self, packet):
     """ handles dump table requests """
-    print("Dumping request: {}".format(packet))
-
     dump = []
     for network_entries in self.routes.values():
       dump += network_entries
 
     msg = {}
+    source = packet['dst']
     msg['src'] = packet['dst']
-    msg['dst'] = packet['src']
+    msg['dst'] = source
     msg['type'] = 'table'
     msg['msg'] = dump
 
     print('Dumping: {}'.format(msg))
     return msg
 
+  def handle_data(self, srcif, packet):
+    # perform network match
+    network_match = None
+    for network in self.relations:
+      if network.split('.')[0] == packet['dst'].split('.')[0]: 
+        network_match = network
+        break
+
+    # check if from customer or peer/provider
+    if (self.relations[srcif] == 'cust') and network_match:
+      self.forward(network_match, packet)
+    else:
+      # send no route
+      packet['type'] = "no route"
+      packet['msg'] = {}
+      self.forward(srcif, packet)
+
   def handle_packet(self, srcif, packet):
     """ dispatches a packet """
     print("======================")
-    print("Handle packet: srcif {} packet {}".format(srcif, packet))
+    print("Received packet srcif {}\n packet {}".format(srcif, packet))
     if packet['type'] == 'update':
       self.update(srcif, packet)  
     elif packet['type'] == 'dump':
-      self.forward(srcif, self.dump(packet))
+      msg = self.dump(packet)
+      print("Dumping to {}:\n{}".format(srcif, msg))
+      self.forward(srcif, msg)
+    elif packet['type'] == 'data':
+      self.handle_data(srcif, packet)
 
     return False
 
@@ -226,8 +254,8 @@ class Router:
 if __name__ == "__main__":
   print("Started router program")
   PARSER = argparse.ArgumentParser(description='route packets')
-  PARSER.add_argument('as_number', type=int)
+  PARSER.add_argument('asn', type=int)
   PARSER.add_argument('networks', metavar='networks', type=str, nargs='+', help="networks")
   ARGS = PARSER.parse_args()
   print(ARGS.networks)
-  Router(ARGS.networks).run()
+  Router(ARGS.asn, ARGS.networks).run()
