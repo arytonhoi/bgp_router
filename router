@@ -47,6 +47,7 @@ class Router:
     self.sockets = {}
     for relationship in networks:
       network, relation = relationship.split("-")
+      print("network {}, relation {}".format(network, relation))
       self.sockets[network] = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
       self.sockets[network].setblocking(0)
       self.sockets[network].connect(network)
@@ -112,11 +113,8 @@ class Router:
 
   def forward(self, srcif, packet):
     """ Forward a data packet """
-    # dst = srcif[:-1] + '1'
     print("Attempting to forward {} to {}".format(packet, srcif))
-    # binary = self.dict_to_binary(packet)
     self.sockets[srcif].sendall(json.dumps(packet).encode('ascii'))
-    print("Forwarded!")
     return False
 
   def coalesce(self):
@@ -126,7 +124,7 @@ class Router:
 
   def update(self, srcif, packet):
     """ handle update packets """
-    print("Updating {} with {}".format(srcif, packet))
+    # print("Updating {} with {}".format(srcif, packet))
 
     # saving copy
     if srcif not in self.updates:
@@ -147,7 +145,7 @@ class Router:
     route_entry['netmask'] = netmask
     route_entry['peer'] = src_ip
     self.routes[network].append(route_entry)
-    print("Added {} to {} forwarding table".format(route_entry, network))
+    # print("Added {} to {} forwarding table".format(route_entry, network))
 
     # sending copy to neighbors
     # updating AS path
@@ -155,16 +153,16 @@ class Router:
     dst =  packet['dst']
 
     if self.relations[srcif] == 'cust':
-      print("Fowarding update to all neighbors")
+      # print("Fowarding update to all neighbors")
       # send to all other neighbors not in same network
       for neighbor in self.relations:        
-        if neighbor.split('.')[0] != network.split('.')[0]:
+        if (neighbor.split('.')[0] != network.split('.')[0]) and not (neighbor.split('.')[0] == '10' and network.split('.')[0] == '11'):
           packet['dst'] = neighbor
           packet['src'] = neighbor[:-1] + '1'
           self.forward(neighbor, packet)
     else:
       # send to customers
-      print("Fowarding update to all customers")
+      # print("Fowarding update to all customers")
       for neighbor in self.relations:
         if self.relations[neighbor] == 'cust':
           packet['dst'] = neighbor
@@ -200,9 +198,17 @@ class Router:
       if network.split('.')[0] == packet['dst'].split('.')[0]: 
         network_match = network
         break
+    
+    if not network_match:
+      for network in self.routes:
+        if network.split('.')[0] == packet['dst'].split('.')[0]: 
+          network_match = self.routes[network][0]['peer']
+          print("MATCHED {} TO {}".format(network, network_match))
+          break
 
+    dst = packet['dst']
     # check if from customer or peer/provider
-    if (self.relations[srcif] == 'cust') and network_match:
+    if ((self.relations[srcif] == 'cust') or (self.relations[dst] == 'cust')) and network_match:
       self.forward(network_match, packet)
     else:
       # send no route
@@ -213,12 +219,12 @@ class Router:
   def handle_packet(self, srcif, packet):
     """ dispatches a packet """
     print("======================")
-    print("Received packet srcif {}\n packet {}".format(srcif, packet))
+    print("Received packet from {}\n packet {}".format(srcif, packet))
     if packet['type'] == 'update':
       self.update(srcif, packet)  
     elif packet['type'] == 'dump':
       msg = self.dump(packet)
-      print("Dumping to {}:\n{}".format(srcif, msg))
+      # print("Dumping to {}:\n{}".format(srcif, msg))
       self.forward(srcif, msg)
     elif packet['type'] == 'data':
       self.handle_data(srcif, packet)
@@ -252,10 +258,8 @@ class Router:
           return
 
 if __name__ == "__main__":
-  print("Started router program")
   PARSER = argparse.ArgumentParser(description='route packets')
   PARSER.add_argument('asn', type=int)
   PARSER.add_argument('networks', metavar='networks', type=str, nargs='+', help="networks")
   ARGS = PARSER.parse_args()
-  print(ARGS.networks)
   Router(ARGS.asn, ARGS.networks).run()
