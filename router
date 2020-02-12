@@ -36,230 +36,245 @@ PROV = "prov"
 
 ##########################################################################################
 
+
 class Router:
-  """ Your Router """
-  def __init__(self, asn, networks):
-    print("Started constructor")
-    self.asn = asn
-    self.routes = {}
-    self.updates = {}
-    self.relations = {}
-    self.sockets = {}
-    for relationship in networks:
-      network, relation = relationship.split("-")
-      print("network {}, relation {}".format(network, relation))
-      self.sockets[network] = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-      self.sockets[network].setblocking(0)
-      self.sockets[network].connect(network)
-      self.relations[network] = relation
-    print("Finished constructor")
+    """ Your Router """
 
-  def lookup_routes(self, daddr):
-    """ Lookup all valid routes for an address """
-    # TODO
-    outroutes = []
-    return outroutes
+    def __init__(self, asn, networks):
+        self.asn = asn
+        self.routes = {}
+        self.updates = {}
+        self.relations = {}
+        self.sockets = {}
+        for relationship in networks:
+            network, relation = relationship.split("-")
+            print("network {}, relation {}".format(network, relation))
+            self.sockets[network] = socket.socket(
+                socket.AF_UNIX, socket.SOCK_SEQPACKET)
+            self.sockets[network].setblocking(0)
+            self.sockets[network].connect(network)
+            self.relations[network] = relation
 
-  def get_shortest_as_path(self, routes):
-    """ select the route with the shortest AS Path """
-    # TODO
-    outroutes = []
-    return outroutes
+    def lookup_routes(self, daddr):
+        """ Lookup all valid routes for an address """
+        network = '.'.join(daddr.split('.')[:3])
+        outroutes = []
+        if network in self.routes:
+          for network in self.routes[network]:
+            outroutes.append(network['peer'])
+        print("finding route for {} and found {}".format(daddr, outroutes))
+        return outroutes
 
-  def get_highest_preference(self, routes):
-    """ select the route with the shortest AS Path """
-    # TODO
-    outroutes = []
-    return outroutes
+    def lookup_peer(self, daddr):
+        # peer network match
+        peer_match = None
+        for peer in self.relations:
+            if peer.split('.')[:3] == daddr.split('.')[:3]:
+                peer_match = peer
+                break
+        print("finding peer for {} and found {}".format(daddr, peer_match))
+        return peer_match
 
-  def get_self_origin(self, routes):
-    """ select self originating routes """
-    # TODO
-    outroutes = []
-    return outroutes
+    def get_shortest_as_path(self, routes):
+        """ select the route with the shortest AS Path """
+        # TODO
+        outroutes = routes
+        return outroutes
 
-  def get_origin_routes(self, routes):
-    """ select origin routes: EGP > IGP > UNK """
-    # TODO
-    outroutes = []
-    return outroutes
+    def get_highest_preference(self, routes):
+        """ select the route with the shortest AS Path """
+        # TODO
+        outroutes = routes
+        return outroutes
 
-  def filter_relationships(self, srcif, routes):
-    """ Don't allow Peer->Peer, Peer->Prov, or Prov->Peer forwards """
-    outroutes = []
-    return outroutes
+    def get_self_origin(self, routes):
+        """ select self originating routes """
+        # TODO
+        outroutes = routes
+        return outroutes
 
-  def get_route(self, srcif, daddr):
-    """ Select the best route for a given address """
-    # TODO
-    peer = None
-    routes = self.lookup_routes(daddr)
-    # Rules go here
-    if routes:
-      # 1. Highest Preference
-      routes = self.get_highest_preference(routes)
-      # 2. Self Origin
-      routes = self.get_self_origin(routes)
-      # 3. Shortest ASPath
-      routes = self.get_shortest_as_path(routes)
-      # 4. EGP > IGP > UNK
-      routes = self.get_origin_routes(routes)
-      # 5. Lowest IP Address
-      # TODO
-      # Final check: enforce peering relationships
-      routes = self.filter_relationships(srcif, routes)
-    return self.sockets[peer] if peer else None
-    
+    def get_origin_routes(self, routes):
+        """ select origin routes: EGP > IGP > UNK """
+        # TODO
+        outroutes = routes
+        return outroutes
 
-  def forward(self, srcif, packet):
-    """ Forward a data packet """
-    print("Attempting to forward {} to {}".format(packet, srcif))
-    self.sockets[srcif].sendall(json.dumps(packet).encode('ascii'))
-    return False
-
-  def coalesce(self):
-    """ coalesce any routes that are right next to each other """
-    # TODO (this is the most difficult task, save until last)
-    return False
-
-  def update(self, srcif, packet):
-    """ handle update packets """
-    # print("Updating {} with {}".format(srcif, packet))
-
-    # saving copy
-    if srcif not in self.updates:
-      self.updates[srcif] = []
-    self.updates[srcif].append(packet)
-
-    # saving to forwarding table
-    src_ip = packet['src']
-    dst_ip = packet['dst']
-    msg = packet['msg']
-    network = msg['network']
-    netmask = msg['netmask']
-
-    if network not in self.routes:
-      self.routes[network] = []
-    route_entry = {}
-    route_entry['network'] = network
-    route_entry['netmask'] = netmask
-    route_entry['peer'] = src_ip
-    self.routes[network].append(route_entry)
-    # print("Added {} to {} forwarding table".format(route_entry, network))
-
-    # sending copy to neighbors
-    # updating AS path
-    packet['msg']['ASPath'].append(self.asn)
-    dst =  packet['dst']
-
-    if self.relations[srcif] == 'cust':
-      # print("Fowarding update to all neighbors")
-      # send to all other neighbors not in same network
-      for neighbor in self.relations:        
-        if (neighbor.split('.')[0] != network.split('.')[0]) and not (neighbor.split('.')[0] == '10' and network.split('.')[0] == '11'):
-          packet['dst'] = neighbor
-          packet['src'] = neighbor[:-1] + '1'
-          self.forward(neighbor, packet)
-    else:
-      # send to customers
-      # print("Fowarding update to all customers")
-      for neighbor in self.relations:
-        if self.relations[neighbor] == 'cust':
-          packet['dst'] = neighbor
-          self.forward(neighbor, packet)
-
-    return False
-
-  def revoke(self, packet):
-    """ handle revoke packets """
-    # TODO
-    return True
-
-  def dump(self, packet):
-    """ handles dump table requests """
-    dump = []
-    for network_entries in self.routes.values():
-      dump += network_entries
-
-    msg = {}
-    source = packet['dst']
-    msg['src'] = packet['dst']
-    msg['dst'] = source
-    msg['type'] = 'table'
-    msg['msg'] = dump
-
-    print('Dumping: {}'.format(msg))
-    return msg
-
-  def handle_data(self, srcif, packet):
-    # perform network match
-    network_match = None
-    for network in self.relations:
-      if network.split('.')[0] == packet['dst'].split('.')[0]: 
-        network_match = network
-        break
-    
-    if not network_match:
-      for network in self.routes:
-        if network.split('.')[0] == packet['dst'].split('.')[0]: 
-          network_match = self.routes[network][0]['peer']
-          print("MATCHED {} TO {}".format(network, network_match))
-          break
-
-    dst = packet['dst']
-    # check if from customer or peer/provider
-    if ((self.relations[srcif] == 'cust') or (self.relations[dst] == 'cust')) and network_match:
-      self.forward(network_match, packet)
-    else:
-      # send no route
-      packet['type'] = "no route"
-      packet['msg'] = {}
-      self.forward(srcif, packet)
-
-  def handle_packet(self, srcif, packet):
-    """ dispatches a packet """
-    print("======================")
-    print("Received packet from {}\n packet {}".format(srcif, packet))
-    if packet['type'] == 'update':
-      self.update(srcif, packet)  
-    elif packet['type'] == 'dump':
-      msg = self.dump(packet)
-      # print("Dumping to {}:\n{}".format(srcif, msg))
-      self.forward(srcif, msg)
-    elif packet['type'] == 'data':
-      self.handle_data(srcif, packet)
-
-    return False
-
-  def send_error(self, conn, msg):
-    """ Send a no_route error message """
-    # TODO
-    return
-
-  def run(self):
-    """ main loop for the router """
-    while True:
-      socks = select.select(self.sockets.values(), [], [], 0.1)[0]
-      for conn in socks:
-        try:
-          k = conn.recv(65535)
-        except:
-          # either died on a connection reset, or was SIGTERM's by parent
-          return
-        if k:
-          for sock in self.sockets:
-            if self.sockets[sock] == conn:
-              srcif = sock
-          msg = json.loads(k)
-          print("Msg: {}".format(msg))
-          if not self.handle_packet(srcif, msg):
-            self.send_error(conn, msg)
+    def filter_relationships(self, srcif, routes):
+        """ Don't allow Peer->Peer, Peer->Prov, or Prov->Peer forwards """
+        outroutes = []
+        # check if either src or dst of packet is customer
+        if self.relations[srcif] == 'cust':
+            outroutes += routes
         else:
-          return
+            # src is either peer or provider
+            for route in routes:
+                if self.relations[route] == 'cust':
+                    outroutes.append(route)
+        return outroutes
+
+    def get_route(self, srcif, daddr):
+        """ Select the best route for a given address """
+        peer = self.lookup_peer(daddr)
+        routes = None
+        if not peer:
+            routes = self.lookup_routes(daddr)
+
+        # Rules go here
+        if routes:
+                # 1. Highest Preference
+            routes = self.get_highest_preference(routes)
+            # 2. Self Origin
+            routes = self.get_self_origin(routes)
+            # 3. Shortest ASPath
+            routes = self.get_shortest_as_path(routes)
+            # 4. EGP > IGP > UNK
+            routes = self.get_origin_routes(routes)
+            # 5. Lowest IP Address
+            # TODO
+            # Final check: enforce peering relationships
+            routes = self.filter_relationships(srcif, routes)
+          
+        return peer if peer else routes[0]
+
+    def forward(self, srcif, packet):
+        """ Forward a data packet """
+        print("Attempting to forward {} to {}".format(packet, srcif))
+        self.sockets[srcif].sendall(json.dumps(packet).encode('ascii'))
+        return False
+
+    def coalesce(self):
+        """ coalesce any routes that are right next to each other """
+        # TODO (this is the most difficult task, save until last)
+        return False
+
+    def update(self, srcif, packet):
+        """ handle update packets """
+        print("Updating {} with {}".format(srcif, packet))
+
+        # saving copy
+        if srcif not in self.updates:
+            self.updates[srcif] = []
+        self.updates[srcif].append(packet)
+
+        # saving to forwarding table
+        src_ip = packet['src']
+        dst_ip = packet['dst']
+        msg = packet['msg']
+        network = msg['network']
+        netmask = msg['netmask']
+
+        route_entry = {}
+        route_entry['netmask'] = netmask
+        route_entry['peer'] = src_ip
+        network = '.'.join(network.split('.')[:3])
+        if network not in self.routes:
+          self.routes[network] = []
+        self.routes[network].append(route_entry)
+        print("Added {} to {} forwarding table".format(route_entry, network))
+
+        # sending copy to neighbors
+        # updating AS path
+        packet['msg']['ASPath'].append(self.asn)
+        dst = packet['dst']
+
+        if self.relations[srcif] == 'cust':
+            # send to all other neighbors not in same network
+            for neighbor in self.relations:
+                if (neighbor.split('.')[:3] != srcif.split('.')[:3]):
+                    packet['dst'] = neighbor
+                    packet['src'] = neighbor[:-1] + '1'
+                    self.forward(neighbor, packet)
+        else:
+            # send to customers
+            for neighbor in self.relations:
+                if self.relations[neighbor] == 'cust':
+                    packet['dst'] = neighbor
+                    packet['src'] = neighbor[:-1] + '1'
+                    self.forward(neighbor, packet)
+        return False
+
+    def revoke(self, packet):
+        """ handle revoke packets """
+        # TODO
+        return True
+
+    def dump(self, packet):
+        """ handles dump table requests """
+        dump = []
+        for network in self.routes:
+            for route in self.routes[network]:
+              dump_entry = {}
+              dump_entry['network'] = network + '.0'
+              dump_entry['netmask'] = route['netmask']
+              dump_entry['peer'] = route['peer']
+              dump.append(dump_entry)
+
+        msg = {}
+        source = packet['dst']
+        msg['src'] = packet['dst']
+        msg['dst'] = source
+        msg['type'] = 'table'
+        msg['msg'] = dump
+
+        print('Dumping: {}'.format(msg))
+        return msg
+
+    def handle_data(self, srcif, packet):
+        peer = self.get_route(srcif, packet['dst'])
+        if peer:
+            self.forward(peer, packet)
+        else:
+            # no route or source and dest are peer/provider, send no route back
+            print("Sending no route back to {}".format(srcif))
+            packet['type'] = "no route"
+            packet['msg'] = {}
+            self.forward(srcif, packet)
+
+    def handle_packet(self, srcif, packet):
+        """ dispatches a packet """
+        # print("======================")
+        print("Received packet from {}\n packet {}".format(srcif, packet))
+        if packet['type'] == 'update':
+            self.update(srcif, packet)
+        elif packet['type'] == 'dump':
+            msg = self.dump(packet)
+            self.forward(srcif, msg)
+        elif packet['type'] == 'data':
+            self.handle_data(srcif, packet)
+
+        return False
+
+    def send_error(self, conn, msg):
+        """ Send a no_route error message """
+        # TODO
+        return
+
+    def run(self):
+        """ main loop for the router """
+        while True:
+            socks = select.select(self.sockets.values(), [], [], 0.1)[0]
+            for conn in socks:
+                try:
+                    k = conn.recv(65535)
+                except:
+                    # either died on a connection reset, or was SIGTERM's by parent
+                    return
+                if k:
+                    for sock in self.sockets:
+                        if self.sockets[sock] == conn:
+                            srcif = sock
+                    msg = json.loads(k)
+                    # print("Msg: {}".format(msg))
+                    if not self.handle_packet(srcif, msg):
+                        self.send_error(conn, msg)
+                else:
+                    return
+
 
 if __name__ == "__main__":
-  PARSER = argparse.ArgumentParser(description='route packets')
-  PARSER.add_argument('asn', type=int)
-  PARSER.add_argument('networks', metavar='networks', type=str, nargs='+', help="networks")
-  ARGS = PARSER.parse_args()
-  Router(ARGS.asn, ARGS.networks).run()
+    PARSER = argparse.ArgumentParser(description='route packets')
+    PARSER.add_argument('asn', type=int)
+    PARSER.add_argument('networks', metavar='networks',
+                        type=str, nargs='+', help="networks")
+    ARGS = PARSER.parse_args()
+    Router(ARGS.asn, ARGS.networks).run()
