@@ -42,6 +42,7 @@ class Router:
     """ Your Router """
 
     def __init__(self, asn, networks):
+        print('\n ===================================== \n new test \n =====================================')
         self.asn = asn
         self.routes = {}
         self.updates = {}
@@ -180,9 +181,6 @@ class Router:
             if char == bin_network_ip[i]:
                 match_length += 1
 
-        print("dst {}, network {}, length {}".format(
-            bin_daddr, bin_network_ip, match_length))
-
         return match_length
 
     def get_longest_prefix(self, daddr, routes):
@@ -203,8 +201,6 @@ class Router:
         for network_match in network_matches:
             outroutes += self.routes[network_match]
 
-        print("prefix matched {}".format(outroutes))
-
         return outroutes
 
     def get_route(self, srcif, daddr):
@@ -213,31 +209,29 @@ class Router:
         routes = None
         if not peer:
             routes = self.lookup_routes(daddr)
-        print(routes)
         # Rules go here
         if routes:
             # 0: longest prefix matching
             routes = self.get_longest_prefix(daddr, routes)
             # 1. Highest Preference
             routes = self.get_highest_preference(routes)
-            print("pref {}".format(routes))
+            # print("pref {}".format(routes))
             # 2. Self Origin
             routes = self.get_self_origin(routes)
-            print("self origin {}".format(routes))
+            # print("self origin {}".format(routes))
             # 3. Shortest ASPath
             routes = self.get_shortest_as_path(routes)
-            print("as_path {}".format(routes))
+            # print("as_path {}".format(routes))
             # 4. EGP > IGP > UNK
             routes = self.get_origin_routes(routes)
-            print("origin_routes {}".format(routes))
+            # print("origin_routes {}".format(routes))
             # 5. Lowest IP Address
             route = self.get_lowest_ip_neighbor(routes)
-            print("lowest ip {}".format(route))
+            # print("lowest ip {}".format(route))
             # Final check: enforce peering relationships
             route = self.filter_relationships(srcif, route)
 
         if peer:
-            print("sending to peer: {}".format(peer))
             return peer
         elif route:
             return route['peer']
@@ -366,14 +360,31 @@ class Router:
         for chunk in ip2_arr:
             chunk_str = bin(int(chunk))[2:]
             bin_ip2 += chunk_str.zfill(8)
-        
+
         for i in range(len(bin_ip1)):
             if bin_ip1[i] != bin_ip2[i]:
                 distance += 1
-        
+
         return distance
 
-    def aggregate_helper(self, rows):
+    def decrement_netmask(self, netmask):
+        netmask_arr = netmask.split('.')
+        decremented_netmask_arr = []
+        decremented = False
+        for i in reversed(range(len(netmask_arr))):
+            netmask_chunk = netmask_arr[i]
+            netmask_chunk_value = int(netmask_chunk)
+            if netmask_chunk_value != 0 and not decremented:
+                netmask_chunk = str(netmask_chunk_value - 1)
+                decremented = True
+            decremented_netmask_arr = [netmask_chunk] + decremented_netmask_arr
+
+        return '.'.join(decremented_netmask_arr)
+
+    def aggregate_matches(self, rows):
+        if len(rows) < 2:
+            return rows[0]
+
         smallest_sum = math.inf
         smallest_ip_index = None
         for i in range(len(rows)):
@@ -382,35 +393,44 @@ class Router:
                 smallest_ip_index = i
 
         return_row = rows[smallest_ip_index]
-        if len(rows) > 1:
-            return_row['netmask'] = '255.255.254.0'
+        return_row['netmask'] = self.decrement_netmask(return_row['netmask'])
+        print("aggregated matches from {} to {}".format(rows, return_row))
         return return_row
 
     def aggregate(self, table):
         print('aggregating {}'.format(table))
-        aggregated_table = []
-        seen = []
-        for i in range(len(table)):
-            if i not in seen:
-                seen.append(i)
-                row = table[i]
-                print("row: {}".format(row))
-                row_matches = []
-                row_matches.append(row)
-                for j in range(i, len(table)):
-                    if j not in seen:
-                        potential_match = table[j]
-                        if (row['netmask'] == potential_match['netmask'] and
-                            row['localpref'] == potential_match['localpref'] and
-                            row['selfOrigin'] == potential_match['selfOrigin'] and
-                            row['ASPath'] == potential_match['ASPath'] and
-                            row['origin'] == potential_match['origin'] and
-                                (self.ip_distance(row['network'], potential_match['network']) <= 1)):
-                            seen.append(j)
-                            row_matches.append(potential_match)
-                aggregated_table.append(self.aggregate_helper(row_matches))
-        print("aggregated: {}".format(aggregated_table))
-        return aggregated_table
+        table_changed = True
+        final_aggregated_table = table
+        while table_changed:
+            aggregated_table = []
+            table_changed = False
+            seen = []
+            # loop through rows
+            for i in range(len(final_aggregated_table)):
+                if i not in seen:
+                    seen.append(i)
+                    row = final_aggregated_table[i]
+                    row_matches = []
+                    row_matches.append(row)
+                    # compare with all other rows to see if aggregation
+                    for j in range(i, len(final_aggregated_table)):
+                        if j not in seen:
+                            potential_match = final_aggregated_table[j]
+                            if (row['netmask'] == potential_match['netmask'] and
+                                row['localpref'] == potential_match['localpref'] and
+                                row['selfOrigin'] == potential_match['selfOrigin'] and
+                                row['ASPath'] == potential_match['ASPath'] and
+                                row['origin'] == potential_match['origin'] and
+                                    (self.ip_distance(row['network'], potential_match['network']) <= 1)):
+                                table_changed = True
+                                seen.append(j)
+                                row_matches.append(potential_match)
+                    aggregated_table.append(self.aggregate_matches(row_matches))
+            if table_changed:
+                final_aggregated_table = aggregated_table
+
+        print("aggregated: {}".format(final_aggregated_table))
+        return final_aggregated_table
 
     def dump(self, packet):
         """ handles dump table requests """
@@ -426,7 +446,7 @@ class Router:
                 predump_entry['ASPath'] = route['ASPath']
                 predump_entry['origin'] = route['origin']
                 predump.append(predump_entry)
-        
+
         dump = self.aggregate(predump)
         # dump = []
         # for network in self.routes:
