@@ -381,7 +381,10 @@ class Router:
                 smallest_sum = self.sum_ip(rows[i]['network'])
                 smallest_ip_index = i
 
-        return rows[smallest_ip_index]
+        return_row = rows[smallest_ip_index]
+        if len(rows) > 1:
+            return_row['netmask'] = '255.255.254.0'
+        return return_row
 
     def aggregate(self, table):
         print('aggregating {}'.format(table))
@@ -405,7 +408,7 @@ class Router:
                                 (self.ip_distance(row['network'], potential_match['network']) <= 1)):
                             seen.append(j)
                             row_matches.append(potential_match)
-                            aggregated_table.append(self.aggregate_helper(row_matches))
+                aggregated_table.append(self.aggregate_helper(row_matches))
         print("aggregated: {}".format(aggregated_table))
         return aggregated_table
 
