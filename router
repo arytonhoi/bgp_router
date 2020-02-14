@@ -367,22 +367,46 @@ class Router:
 
         return distance
 
-    def decrement_netmask(self, netmask):
-        netmask_arr = netmask.split('.')
-        decremented_netmask_arr = []
-        decremented = False
-        for i in reversed(range(len(netmask_arr))):
-            netmask_chunk = netmask_arr[i]
-            netmask_chunk_value = int(netmask_chunk)
-            if netmask_chunk_value != 0 and not decremented:
-                netmask_chunk = str(netmask_chunk_value - 1)
-                decremented = True
-            decremented_netmask_arr = [netmask_chunk] + decremented_netmask_arr
+    def get_max_netmask(self, routes):
+        
+        bin_networks = []
+        for route in routes:
+            bin_route = ''
+            route_arr = route['network'].split('.')
+            for route_chunk in route_arr:
+                bin_route += bin(int(route_chunk))[2:].zfill(8)
+            bin_networks.append(bin_route)
+        print("getting max netmasks of {} as bin {}".format(routes, bin_networks))
 
-        return '.'.join(decremented_netmask_arr)
+        longest_prefix_length = 0
+        continuous = True
+        i = 0
+        while continuous and i < len(bin_networks[0]):
+            bit = bin_networks[0][i]
+            for bin_network in bin_networks:
+                if bin_network[i] != bit:
+                    continuous = False
+                    longest_prefix_length = i
+                    break
+            i += 1
+
+        max_bin_netmask = ''
+        for i in range(32):
+            if i < longest_prefix_length:
+                max_bin_netmask += '1'
+            else:
+                max_bin_netmask += '0'
+        print('max prefix length {} and max netmask {}'.format(longest_prefix_length, max_bin_netmask))
+
+        netmask_arr = []
+        for i in range(4):
+            netmask_arr.append(str(int('0b' + max_bin_netmask[i * 8: (i * 8) + 8], 2)))
+
+        print('returning max netmask {}'.format('.'.join(netmask_arr)))
+        return '.'.join(netmask_arr)
 
     def aggregate_matches(self, rows):
-        if len(rows) < 2:
+        if len(rows) <= 1:
             return rows[0]
 
         smallest_sum = math.inf
@@ -393,48 +417,70 @@ class Router:
                 smallest_ip_index = i
 
         return_row = rows[smallest_ip_index]
-        return_row['netmask'] = self.decrement_netmask(return_row['netmask'])
+        return_row['netmask'] = self.get_max_netmask(rows)
         print("aggregated matches from {} to {}".format(rows, return_row))
         return return_row
 
-    #192.168.00000000.0 / 23
-    #192.168.00000011.0 / 24
+    # 192.168.00000000.0 / 24
+    # 192.168.00000001.0 / 24
+    # 192.168.00000010.0 / 24
+    # 192.168.00000011.0 / 24
 
+    # sort ip table based on network ip
+        # collect all ip's that are contiguous
+        # get the lowest ip
+        # get the maximum netmask prefix
+
+    def sort_by_ips(self, table):
+        # dict of ip_value : table row
+        d = {}
+        for row in table:
+            d[self.sum_ip(row['network'])] = row
+
+        sorted_table = []
+        for ip_sum in sorted(d.keys()):
+            sorted_table.append(d[ip_sum])
+
+        return sorted_table
+
+    def is_contiguous_ips(self, routes, candidate):
+        is_contiguous_ips = False
+        for route in routes:
+            if self.ip_distance(route['network'], candidate['network']) <= 1:
+                is_contiguous_ips = True
+
+        return is_contiguous_ips
 
     def aggregate(self, table):
         print('aggregating {}'.format(table))
-        table_changed = True
-        final_aggregated_table = table
-        while table_changed:
-            aggregated_table = []
-            table_changed = False
-            seen = []
-            # loop through rows
-            for i in range(len(final_aggregated_table)):
-                if i not in seen:
-                    seen.append(i)
-                    row = final_aggregated_table[i]
-                    row_matches = []
-                    row_matches.append(row)
-                    # compare with all other rows to see if aggregation
-                    for j in range(i, len(final_aggregated_table)):
-                        if j not in seen:
-                            potential_match = final_aggregated_table[j]
-                            if (row['netmask'] == potential_match['netmask'] and
-                                row['localpref'] == potential_match['localpref'] and
-                                row['selfOrigin'] == potential_match['selfOrigin'] and
-                                row['ASPath'] == potential_match['ASPath'] and
-                                row['origin'] == potential_match['origin'] and
-                                    (self.ip_distance(row['netmask'], potential_match['netmask']) <= 1)):
-                                table_changed = True
-                                seen.append(j)
-                                row_matches.append(potential_match)
-                    aggregated_table.append(self.aggregate_matches(row_matches))
-            if table_changed:
-                final_aggregated_table = aggregated_table
+        sorted_table = self.sort_by_ips(table)
 
-        print("aggregated: {}".format(final_aggregated_table))
-        return final_aggregated_table
+        aggregated_table = []
+        seen = []
+        # loop through rows
+        for i in range(len(sorted_table)):
+            if i not in seen:
+                seen.append(i)
+                row = sorted_table[i]
+                row_matches = []
+                row_matches.append(row)
+                # compare with all other rows to see if aggregation
+                for j in range(i, len(sorted_table)):
+                    if j not in seen:
+                        potential_match = sorted_table[j]
+                        if (row['netmask'] == potential_match['netmask'] and
+                            row['localpref'] == potential_match['localpref'] and
+                            row['selfOrigin'] == potential_match['selfOrigin'] and
+                            row['ASPath'] == potential_match['ASPath'] and
+                            row['origin'] == potential_match['origin'] and
+                                self.is_contiguous_ips(row_matches, potential_match)):
+                            seen.append(j)
+                            row_matches.append(potential_match)
+
+                aggregated_table.append(self.aggregate_matches(row_matches))
+
+        print("aggregated: {}".format(aggregated_table))
+        return aggregated_table
 
     def dump(self, packet):
         """ handles dump table requests """
