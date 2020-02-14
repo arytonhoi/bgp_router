@@ -397,6 +397,10 @@ class Router:
         print("aggregated matches from {} to {}".format(rows, return_row))
         return return_row
 
+    #192.168.00000000.0 / 23
+    #192.168.00000011.0 / 24
+
+
     def aggregate(self, table):
         print('aggregating {}'.format(table))
         table_changed = True
@@ -421,7 +425,7 @@ class Router:
                                 row['selfOrigin'] == potential_match['selfOrigin'] and
                                 row['ASPath'] == potential_match['ASPath'] and
                                 row['origin'] == potential_match['origin'] and
-                                    (self.ip_distance(row['network'], potential_match['network']) <= 1)):
+                                    (self.ip_distance(row['netmask'], potential_match['netmask']) <= 1)):
                                 table_changed = True
                                 seen.append(j)
                                 row_matches.append(potential_match)
