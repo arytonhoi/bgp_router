@@ -4,6 +4,7 @@ import argparse
 import json
 import select
 import socket
+import math
 
 ##########################################################################################
 
@@ -44,6 +45,7 @@ class Router:
         self.asn = asn
         self.routes = {}
         self.updates = {}
+        self.revokes = {}
         self.relations = {}
         self.sockets = {}
         for relationship in networks:
@@ -60,9 +62,8 @@ class Router:
         network = '.'.join(daddr.split('.')[:3])
         outroutes = []
         if network in self.routes:
-          for network in self.routes[network]:
-            outroutes.append(network['peer'])
-        print("finding route for {} and found {}".format(daddr, outroutes))
+            outroutes += self.routes[network]
+        # print("finding route for {} and found {}".format(daddr, outroutes))
         return outroutes
 
     def lookup_peer(self, daddr):
@@ -77,39 +78,133 @@ class Router:
 
     def get_shortest_as_path(self, routes):
         """ select the route with the shortest AS Path """
-        # TODO
-        outroutes = routes
+        outroutes = []
+        shortest_length = math.inf
+        for route in routes:
+            if len(route['ASPath']) < shortest_length:
+                shortest_length = len(route['ASPath'])
+                outroutes = []
+                outroutes.append(route)
+            elif len(route['ASPath']) == shortest_length:
+                outroutes.append(route)
         return outroutes
 
     def get_highest_preference(self, routes):
         """ select the route with the shortest AS Path """
-        # TODO
-        outroutes = routes
+        highest_pref = 0
+        outroutes = []
+        for route in routes:
+            localpref = route['localpref']
+            if localpref > highest_pref:
+                outroutes = []
+                outroutes.append(route)
+                highest_pref = localpref
+            elif localpref == highest_pref:
+                outroutes.append(route)
+
         return outroutes
 
     def get_self_origin(self, routes):
         """ select self originating routes """
-        # TODO
-        outroutes = routes
-        return outroutes
+        outroutes = []
+        for route in routes:
+            if route['selfOrigin']:
+                outroutes.append(route)
+        if not outroutes:
+            return routes
+        else:
+            return outroutes
 
     def get_origin_routes(self, routes):
-        """ select origin routes: EGP > IGP > UNK """
-        # TODO
-        outroutes = routes
+        """ select origin routes: IGP > EGP > UNK """
+        outroutes = []
+        origin_order = {"IGP": 0, "EGP": 1, "UNK": 2}
+        best_origin = "UNK"
+        for route in routes:
+            origin = route['origin']
+            if origin_order[origin] < origin_order[best_origin]:
+                outroutes = []
+                outroutes.append(route)
+                best_origin = origin
+            elif origin == best_origin:
+                outroutes.append(route)
         return outroutes
 
-    def filter_relationships(self, srcif, routes):
+    def sum_ip(self, ip_address):
+        ip_sum = 0
+        power = 0
+        segments = ip_address.split('.')
+        for segment in segments:
+            ip_sum += int(segment) * (2**power)
+            power += 8
+
+        return ip_sum
+
+    def get_lowest_ip_neighbor(self, routes):
+        outroute = None
+        lowest_ip_address = math.inf
+        for route in routes:
+            ip_sum = self.sum_ip(route['peer'])
+            if ip_sum < lowest_ip_address:
+                outroute = route
+                lowest_ip_address = ip_sum
+
+        return outroute
+
+    def filter_relationships(self, srcif, route):
         """ Don't allow Peer->Peer, Peer->Prov, or Prov->Peer forwards """
-        outroutes = []
         # check if either src or dst of packet is customer
-        if self.relations[srcif] == 'cust':
-            outroutes += routes
-        else:
-            # src is either peer or provider
-            for route in routes:
-                if self.relations[route] == 'cust':
-                    outroutes.append(route)
+        outroute = None
+        if (self.relations[srcif] == 'cust' or
+                self.relations[route['peer']] == 'cust'):
+            outroute = route
+        return outroute
+
+    def longest_prefix_matching(self, daddr, network_ip):
+        # split dst and key by . => convert each chunk into binary
+        match_length = 0
+        bin_daddr = ''
+        bin_network_ip = ''
+
+        daddr_arr = daddr.split('.')
+        for chunk in daddr_arr:
+            chunk_str = bin(int(chunk))[2:]
+            bin_daddr += chunk_str.zfill(8)
+
+        network_arr = network_ip.split('.')
+        for chunk in network_arr:
+            chunk_str = bin(int(chunk))[2:]
+            bin_network_ip += chunk_str.zfill(8)
+
+        for i, char in enumerate(bin_daddr):
+            if char == bin_network_ip[i]:
+                match_length += 1
+
+        print("dst {}, network {}, length {}".format(
+            bin_daddr, bin_network_ip, match_length))
+
+        return match_length
+
+    def get_longest_prefix(self, daddr, routes):
+        """ select the route with the shortest AS Path """
+        longest_match = 0
+        network_matches = []
+        for network_ip in self.routes:
+            prefix_match_length = self.longest_prefix_matching(
+                daddr, network_ip + ".0")
+            if prefix_match_length > longest_match:
+                network_matches = []
+                network_matches.append(network_ip)
+                longest_match = prefix_match_length
+            elif prefix_match_length == longest_match:
+                network_matches.append(network_ip)
+
+        outroutes = []
+        for network_match in network_matches:
+            outroutes += self.routes[network_match]
+
+        print("prefix matched {}".format(outroutes))
+
         return outroutes
 
     def get_route(self, srcif, daddr):
@@ -118,23 +213,36 @@ class Router:
         routes = None
         if not peer:
             routes = self.lookup_routes(daddr)
-
+        print(routes)
         # Rules go here
         if routes:
-                # 1. Highest Preference
+            # 0: longest prefix matching
+            routes = self.get_longest_prefix(daddr, routes)
+            # 1. Highest Preference
             routes = self.get_highest_preference(routes)
+            print("pref {}".format(routes))
             # 2. Self Origin
             routes = self.get_self_origin(routes)
+            print("self origin {}".format(routes))
             # 3. Shortest ASPath
             routes = self.get_shortest_as_path(routes)
+            print("as_path {}".format(routes))
             # 4. EGP > IGP > UNK
             routes = self.get_origin_routes(routes)
+            print("origin_routes {}".format(routes))
             # 5. Lowest IP Address
-            # TODO
+            route = self.get_lowest_ip_neighbor(routes)
+            print("lowest ip {}".format(route))
             # Final check: enforce peering relationships
-            routes = self.filter_relationships(srcif, routes)
-          
-        return peer if peer else routes[0]
+            route = self.filter_relationships(srcif, route)
+
+        if peer:
+            print("sending to peer: {}".format(peer))
+            return peer
+        elif route:
+            return route['peer']
+        else:
+            return None
 
     def forward(self, srcif, packet):
         """ Forward a data packet """
@@ -160,23 +268,29 @@ class Router:
         src_ip = packet['src']
         dst_ip = packet['dst']
         msg = packet['msg']
+        # updating AS path
+        msg['ASPath'].append(self.asn)
         network = msg['network']
         netmask = msg['netmask']
+        localpref = msg['localpref']
+        selfOrigin = msg['selfOrigin']
+        ASPath = msg['ASPath']
+        origin = msg['origin']
 
         route_entry = {}
         route_entry['netmask'] = netmask
         route_entry['peer'] = src_ip
+        route_entry['localpref'] = localpref
+        route_entry['selfOrigin'] = selfOrigin
+        route_entry['ASPath'] = ASPath
+        route_entry['origin'] = origin
         network = '.'.join(network.split('.')[:3])
         if network not in self.routes:
-          self.routes[network] = []
+            self.routes[network] = []
         self.routes[network].append(route_entry)
-        print("Added {} to {} forwarding table".format(route_entry, network))
+        # print("Added {} to {} forwarding table".format(route_entry, network))
 
         # sending copy to neighbors
-        # updating AS path
-        packet['msg']['ASPath'].append(self.asn)
-        dst = packet['dst']
-
         if self.relations[srcif] == 'cust':
             # send to all other neighbors not in same network
             for neighbor in self.relations:
@@ -193,21 +307,132 @@ class Router:
                     self.forward(neighbor, packet)
         return False
 
+    def extract_network(self, address):
+        return '.'.join(address.split('.')[:3])
+
     def revoke(self, packet):
         """ handle revoke packets """
-        # TODO
+        src = packet['src']
+        msg = packet['msg']
+
+        print("Revoking for {}".format(src))
+        # save copy
+        if src not in self.revokes:
+            self.revokes[src] = []
+        self.revokes[src].append(packet)
+
+        # update forwarding table
+        for revoke_msg in msg:
+            revoked_network = self.extract_network(revoke_msg['network'])
+            print("Revoking {} with {}".format(revoke_msg, revoked_network))
+            if revoked_network in self.routes:
+                newRoutes = []
+                for route in self.routes[revoked_network]:
+                    if not route['peer'] == src:
+                        print("keeping {}".format(route))
+                        newRoutes.append(route)
+                self.routes[revoked_network] = newRoutes
+
+        # echo to neighbors
+        # sending copy to neighbors
+        if self.relations[src] == 'cust':
+            # send to all other neighbors not in same network
+            for neighbor in self.relations:
+                if (neighbor.split('.')[:3] != src.split('.')[:3]):
+                    packet['dst'] = neighbor
+                    packet['src'] = neighbor[:-1] + '1'
+                    self.forward(neighbor, packet)
+        else:
+            # send to customers
+            for neighbor in self.relations:
+                if self.relations[neighbor] == 'cust':
+                    packet['dst'] = neighbor
+                    packet['src'] = neighbor[:-1] + '1'
+                    self.forward(neighbor, packet)
+
         return True
+
+    def ip_distance(self, ip1, ip2):
+        distance = 0
+        bin_ip1 = ''
+        bin_ip2 = ''
+
+        ip1_arr = ip1.split('.')
+        for chunk in ip1_arr:
+            chunk_str = bin(int(chunk))[2:]
+            bin_ip1 += chunk_str.zfill(8)
+
+        ip2_arr = ip2.split('.')
+        for chunk in ip2_arr:
+            chunk_str = bin(int(chunk))[2:]
+            bin_ip2 += chunk_str.zfill(8)
+        
+        for i in range(len(bin_ip1)):
+            if bin_ip1[i] != bin_ip2[i]:
+                distance += 1
+        
+        return distance
+
+    def aggregate_helper(self, rows):
+        smallest_sum = math.inf
+        smallest_ip_index = None
+        for i in range(len(rows)):
+            if self.sum_ip(rows[i]['network']) < smallest_sum:
+                smallest_sum = self.sum_ip(rows[i]['network'])
+                smallest_ip_index = i
+
+        return rows[smallest_ip_index]
+
+    def aggregate(self, table):
+        print('aggregating {}'.format(table))
+        aggregated_table = []
+        seen = []
+        for i in range(len(table)):
+            if i not in seen:
+                seen.append(i)
+                row = table[i]
+                print("row: {}".format(row))
+                row_matches = []
+                row_matches.append(row)
+                for j in range(i, len(table)):
+                    if j not in seen:
+                        potential_match = table[j]
+                        if (row['netmask'] == potential_match['netmask'] and
+                            row['localpref'] == potential_match['localpref'] and
+                            row['selfOrigin'] == potential_match['selfOrigin'] and
+                            row['ASPath'] == potential_match['ASPath'] and
+                            row['origin'] == potential_match['origin'] and
+                                (self.ip_distance(row['network'], potential_match['network']) <= 1)):
+                            seen.append(j)
+                            row_matches.append(potential_match)
+                            aggregated_table.append(self.aggregate_helper(row_matches))
+        print("aggregated: {}".format(aggregated_table))
+        return aggregated_table
 
     def dump(self, packet):
         """ handles dump table requests """
-        dump = []
+        predump = []
         for network in self.routes:
             for route in self.routes[network]:
-              dump_entry = {}
-              dump_entry['network'] = network + '.0'
-              dump_entry['netmask'] = route['netmask']
-              dump_entry['peer'] = route['peer']
-              dump.append(dump_entry)
+                predump_entry = {}
+                predump_entry['network'] = network + '.0'
+                predump_entry['netmask'] = route['netmask']
+                predump_entry['peer'] = route['peer']
+                predump_entry['localpref'] = route['localpref']
+                predump_entry['selfOrigin'] = route['selfOrigin']
+                predump_entry['ASPath'] = route['ASPath']
+                predump_entry['origin'] = route['origin']
+                predump.append(predump_entry)
+        
+        dump = self.aggregate(predump)
+        # dump = []
+        # for network in self.routes:
+        #     for route in self.routes[network]:
+        #         dump_entry = {}
+        #         dump_entry['network'] = network + '.0'
+        #         dump_entry['netmask'] = route['netmask']
+        #         dump_entry['peer'] = route['peer']
+        #         dump.append(dump_entry)
 
         msg = {}
         source = packet['dst']
@@ -220,19 +445,22 @@ class Router:
         return msg
 
     def handle_data(self, srcif, packet):
-        peer = self.get_route(srcif, packet['dst'])
-        if peer:
-            self.forward(peer, packet)
+        peer_address = self.get_route(srcif, packet['dst'])
+        if peer_address:
+            self.forward(peer_address, packet)
         else:
             # no route or source and dest are peer/provider, send no route back
-            print("Sending no route back to {}".format(srcif))
+            dst = packet['dst']
+            src = packet['src']
             packet['type'] = "no route"
+            packet['dst'] = src
+            packet['src'] = self.extract_network(srcif) + ".1"
             packet['msg'] = {}
             self.forward(srcif, packet)
 
     def handle_packet(self, srcif, packet):
         """ dispatches a packet """
-        # print("======================")
+        print("\n ========================================================================================")
         print("Received packet from {}\n packet {}".format(srcif, packet))
         if packet['type'] == 'update':
             self.update(srcif, packet)
@@ -241,6 +469,8 @@ class Router:
             self.forward(srcif, msg)
         elif packet['type'] == 'data':
             self.handle_data(srcif, packet)
+        elif packet['type'] == 'revoke':
+            self.revoke(packet)
 
         return False
 
@@ -264,7 +494,6 @@ class Router:
                         if self.sockets[sock] == conn:
                             srcif = sock
                     msg = json.loads(k)
-                    # print("Msg: {}".format(msg))
                     if not self.handle_packet(srcif, msg):
                         self.send_error(conn, msg)
                 else:
