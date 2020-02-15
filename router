@@ -42,7 +42,7 @@ class Router:
     """ Your Router """
 
     def __init__(self, asn, networks):
-        print('\n ===================================== \n new test \n =====================================')
+        # print('\n ===================================== \n new test \n =====================================')
         self.asn = asn
         self.routes = {}
         self.updates = {}
@@ -51,7 +51,7 @@ class Router:
         self.sockets = {}
         for relationship in networks:
             network, relation = relationship.split("-")
-            print("network {}, relation {}".format(network, relation))
+            # print("network {}, relation {}".format(network, relation))
             self.sockets[network] = socket.socket(
                 socket.AF_UNIX, socket.SOCK_SEQPACKET)
             self.sockets[network].setblocking(0)
@@ -64,7 +64,7 @@ class Router:
         outroutes = []
         if network in self.routes:
             outroutes += self.routes[network]
-        # print("finding route for {} and found {}".format(daddr, outroutes))
+        # # print("finding route for {} and found {}".format(daddr, outroutes))
         return outroutes
 
     def lookup_peer(self, daddr):
@@ -74,7 +74,7 @@ class Router:
             if peer.split('.')[:3] == daddr.split('.')[:3]:
                 peer_match = peer
                 break
-        print("finding peer for {} and found {}".format(daddr, peer_match))
+        # print("finding peer for {} and found {}".format(daddr, peer_match))
         return peer_match
 
     def get_shortest_as_path(self, routes):
@@ -215,19 +215,19 @@ class Router:
             routes = self.get_longest_prefix(daddr, routes)
             # 1. Highest Preference
             routes = self.get_highest_preference(routes)
-            # print("pref {}".format(routes))
+            # # print("pref {}".format(routes))
             # 2. Self Origin
             routes = self.get_self_origin(routes)
-            # print("self origin {}".format(routes))
+            # # print("self origin {}".format(routes))
             # 3. Shortest ASPath
             routes = self.get_shortest_as_path(routes)
-            # print("as_path {}".format(routes))
+            # # print("as_path {}".format(routes))
             # 4. EGP > IGP > UNK
             routes = self.get_origin_routes(routes)
-            # print("origin_routes {}".format(routes))
+            # # print("origin_routes {}".format(routes))
             # 5. Lowest IP Address
             route = self.get_lowest_ip_neighbor(routes)
-            # print("lowest ip {}".format(route))
+            # # print("lowest ip {}".format(route))
             # Final check: enforce peering relationships
             route = self.filter_relationships(srcif, route)
 
@@ -240,7 +240,7 @@ class Router:
 
     def forward(self, srcif, packet):
         """ Forward a data packet """
-        print("Attempting to forward {} to {}".format(packet, srcif))
+        # print("Attempting to forward {} to {}".format(packet, srcif))
         self.sockets[srcif].sendall(json.dumps(packet).encode('ascii'))
         return False
 
@@ -251,7 +251,7 @@ class Router:
 
     def update(self, srcif, packet):
         """ handle update packets """
-        print("Updating {} with {}".format(srcif, packet))
+        # print("Updating {} with {}".format(srcif, packet))
 
         # saving copy
         if srcif not in self.updates:
@@ -282,7 +282,7 @@ class Router:
         if network not in self.routes:
             self.routes[network] = []
         self.routes[network].append(route_entry)
-        # print("Added {} to {} forwarding table".format(route_entry, network))
+        # # print("Added {} to {} forwarding table".format(route_entry, network))
 
         # sending copy to neighbors
         if self.relations[srcif] == 'cust':
@@ -309,7 +309,7 @@ class Router:
         src = packet['src']
         msg = packet['msg']
 
-        print("Revoking for {}".format(src))
+        # print("Revoking for {}".format(src))
         # save copy
         if src not in self.revokes:
             self.revokes[src] = []
@@ -318,12 +318,12 @@ class Router:
         # update forwarding table
         for revoke_msg in msg:
             revoked_network = self.extract_network(revoke_msg['network'])
-            print("Revoking {} with {}".format(revoke_msg, revoked_network))
+            # print("Revoking {} with {}".format(revoke_msg, revoked_network))
             if revoked_network in self.routes:
                 newRoutes = []
                 for route in self.routes[revoked_network]:
                     if not route['peer'] == src:
-                        print("keeping {}".format(route))
+                        # print("keeping {}".format(route))
                         newRoutes.append(route)
                 self.routes[revoked_network] = newRoutes
 
@@ -380,7 +380,7 @@ class Router:
             for route_chunk in route_arr:
                 bin_route += bin(int(route_chunk))[2:].zfill(8)
             bin_networks.append(bin_route)
-        print("getting max netmasks of {} as bin {}".format(routes, bin_networks))
+        # print("getting max netmasks of {} as bin {}".format(routes, bin_networks))
 
         longest_prefix_length = 0
         continuous = True
@@ -400,13 +400,13 @@ class Router:
                 max_bin_netmask += '1'
             else:
                 max_bin_netmask += '0'
-        print('max prefix length {} and max netmask {}'.format(longest_prefix_length, max_bin_netmask))
+        # print('max prefix length {} and max netmask {}'.format(longest_prefix_length, max_bin_netmask))
 
         netmask_arr = []
         for i in range(4):
             netmask_arr.append(str(int('0b' + max_bin_netmask[i * 8: (i * 8) + 8], 2)))
 
-        print('returning max netmask {}'.format('.'.join(netmask_arr)))
+        # print('returning max netmask {}'.format('.'.join(netmask_arr)))
         return '.'.join(netmask_arr)
 
     def aggregate_matches(self, rows):
@@ -422,24 +422,17 @@ class Router:
 
         return_row = rows[smallest_ip_index]
         return_row['netmask'] = self.get_max_netmask(rows)
-        print("aggregated matches from {} to {}".format(rows, return_row))
+        # print("aggregated matches from {} to {}".format(rows, return_row))
         return return_row
-
-    # 192.168.00000000.0 / 24
-    # 192.168.00000001.0 / 24
-    # 192.168.00000010.0 / 24
-    # 192.168.00000011.0 / 24
-
-    # sort ip table based on network ip
-        # collect all ip's that are contiguous
-        # get the lowest ip
-        # get the maximum netmask prefix
 
     def sort_by_ips(self, table):
         # dict of ip_value : table row
         d = {}
         for row in table:
-            d[self.sum_ip(row['network'])] = row
+            ip_sum = self.sum_ip(row['network'])
+            if ip_sum in d:
+                ip_sum += 1
+            d[ip_sum] = row
 
         sorted_table = []
         for ip_sum in sorted(d.keys()):
@@ -458,35 +451,46 @@ class Router:
 
         return is_contiguous_ips
 
+#  [{'network': '11.0.0.0', 'netmask': '255.0.0.0', 'peer': '10.0.0.2', 'localpref': 100, 'selfOrigin': True, 'ASPath': [3, 14], 'origin': 'EGP'}, 
+#  {'network': '12.0.0.0', 'netmask': '255.0.0.0', 'peer': '192.168.0.2', 'localpref': 150, 'selfOrigin': False, 'ASPath': [1, 4, 14], 'origin': 'EGP'}, 
+#  {'network': '172.169.0.0', 'netmask': '255.255.0.0', 'peer': '172.168.0.2', 'localpref': 100, 'selfOrigin': True, 'ASPath': [2, 14], 'origin': 'EGP'}, 
+#  {'network': '192.168.1.0', 'netmask': '255.255.255.0', 'peer': '192.168.0.2', 'localpref': 100, 'selfOrigin': True, 'ASPath': [1, 14], 'origin': 'EGP'}]
+
+
     def aggregate(self, table):
-        print('aggregating {}'.format(table))
         sorted_table = self.sort_by_ips(table)
+        # print("sorted {}".format(sorted_table))
 
         aggregated_table = []
+        # list of tuples index -> peer
         seen = []
         # loop through rows
+        # print("============================")
         for i in range(len(sorted_table)):
+            # print("-----------------------")
+            row = sorted_table[i]
+            # print("considering {}".format(row))
             if i not in seen:
                 seen.append(i)
-                row = sorted_table[i]
                 row_matches = []
                 row_matches.append(row)
                 # compare with all other rows to see if aggregation
-                for j in range(i, len(sorted_table)):
+                for j in range(len(sorted_table)):
+                    potential_match = sorted_table[j]
                     if j not in seen:
-                        potential_match = sorted_table[j]
                         if (row['netmask'] == potential_match['netmask'] and
                             row['localpref'] == potential_match['localpref'] and
                             row['selfOrigin'] == potential_match['selfOrigin'] and
                             row['ASPath'] == potential_match['ASPath'] and
                             row['origin'] == potential_match['origin'] and
+                            row['peer'] == potential_match['peer'] and
                                 self.is_contiguous_ips(row_matches, potential_match)):
                             seen.append(j)
                             row_matches.append(potential_match)
 
                 aggregated_table.append(self.aggregate_matches(row_matches))
 
-        print("aggregated: {}".format(aggregated_table))
+        # print("aggregated: {}".format(aggregated_table))
         return aggregated_table
 
     def dump(self, packet):
@@ -521,7 +525,7 @@ class Router:
         msg['type'] = 'table'
         msg['msg'] = dump
 
-        print('Dumping: {}'.format(msg))
+        # print('Dumping: {}'.format(msg))
         return msg
 
     def handle_data(self, srcif, packet):
@@ -540,8 +544,8 @@ class Router:
 
     def handle_packet(self, srcif, packet):
         """ dispatches a packet """
-        print("\n ========================================================================================")
-        print("Received packet from {}\n packet {}".format(srcif, packet))
+        # print("\n ========================================================================================")
+        # print("Received packet from {}\n packet {}".format(srcif, packet))
         if packet['type'] == 'update':
             self.update(srcif, packet)
         elif packet['type'] == 'dump':
