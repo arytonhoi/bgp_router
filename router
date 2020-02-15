@@ -347,25 +347,29 @@ class Router:
         return True
 
     def ip_distance(self, ip1, ip2):
-        distance = 0
-        bin_ip1 = ''
-        bin_ip2 = ''
-
-        ip1_arr = ip1.split('.')
-        for chunk in ip1_arr:
-            chunk_str = bin(int(chunk))[2:]
-            bin_ip1 += chunk_str.zfill(8)
-
-        ip2_arr = ip2.split('.')
-        for chunk in ip2_arr:
-            chunk_str = bin(int(chunk))[2:]
-            bin_ip2 += chunk_str.zfill(8)
-
-        for i in range(len(bin_ip1)):
-            if bin_ip1[i] != bin_ip2[i]:
-                distance += 1
-
-        return distance
+        ip1_third_chunk = ip1.split('.')[2]
+        ip2_third_chunk = ip2.split('.')[2]
+        return abs(int(ip1_third_chunk) - int(ip2_third_chunk))
+        #
+        # distance = 0
+        # bin_ip1 = ''
+        # bin_ip2 = ''
+        #
+        # ip1_arr = ip1.split('.')
+        # for chunk in ip1_arr:
+        #     chunk_str = bin(int(chunk))[2:]
+        #     bin_ip1 += chunk_str.zfill(8)
+        #
+        # ip2_arr = ip2.split('.')
+        # for chunk in ip2_arr:
+        #     chunk_str = bin(int(chunk))[2:]
+        #     bin_ip2 += chunk_str.zfill(8)
+        #
+        # for i in range(len(bin_ip1)):
+        #     if bin_ip1[i] != bin_ip2[i]:
+        #         distance += 1
+        #
+        # return distance
 
     def get_max_netmask(self, routes):
         
@@ -446,7 +450,10 @@ class Router:
     def is_contiguous_ips(self, routes, candidate):
         is_contiguous_ips = False
         for route in routes:
-            if self.ip_distance(route['network'], candidate['network']) <= 1:
+            route_first_two_chunks = route['network'].split('.')[:2]
+            candidate_first_two_chunks = candidate['network'].split('.')[:2]
+            if route_first_two_chunks == candidate_first_two_chunks \
+                    and self.ip_distance(route['network'], candidate['network']) <= 1:
                 is_contiguous_ips = True
 
         return is_contiguous_ips
